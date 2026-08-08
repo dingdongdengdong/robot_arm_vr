@@ -15,7 +15,7 @@ Quest 오른손 컨트롤러로 가상의 RPO 팔을 실제로 조종해 본다.
     Grip(중지) 꾹    팔 추종 활성화. 떼면 그 자리에 정지, 다시 잡으면 이어서 조작
     Trigger(검지)    손 쥐는 정도 0~1 (현재는 표시만 — Amazing Hand 연결 시 사용)
     A                홈 자세로 복귀
-    B                클러치 기준 리셋
+    B                소프트웨어 정지 래치(토크를 유지한 채 HOLD)
     썸스틱 X         손목 롤(elbow_yaw) 오프셋
 
 사용법:
@@ -42,14 +42,38 @@ from rpo_teleop.arm_config import ArmConfig  # noqa: E402
 from rpo_teleop.certs import get_local_ip, list_local_ips  # noqa: E402
 from rpo_teleop.hand_model import HandModel, grasp_to_servo  # noqa: E402
 from rpo_teleop.jetson_link import (  # noqa: E402
-    STATE_TRIP, JetsonBackend, check_robot_match)
+    STATE_TRIP, JetsonBackend, check_robot_match, home_reached)
 from rpo_teleop import profiles  # noqa: E402
 from rpo_teleop.arm_visual import ArmVisual  # noqa: E402
 from rpo_teleop.transforms import ClutchState, rotvec_to_rotation  # noqa: E402
 from rpo_teleop.xr_server import build_joint_state  # noqa: E402
 from rpo_teleop.xr_source import QuestXRSource  # noqa: E402
 
-DEFAULT_CONFIG = ROOT / "config" / "arm.json"
+DEFAULT_CONFIG = ROOT / "config" / "superarm_j1_j2_jetson.json"
+
+
+def latch_software_stop(
+    latched: bool, pressed: bool, was_pressed: bool
+) -> tuple[bool, bool, bool]:
+    """B 상승 엣지에서 소프트웨어 HOLD를 한 번만 래치한다.
+
+    Returns: ``(latched, was_pressed, newly_latched)``. 한 번 걸리면 해제
+    입력은 없고 프로세스를 재시작해야 한다.
+    """
+    newly_latched = bool(pressed and not was_pressed and not latched)
+    return bool(latched or newly_latched), bool(pressed), newly_latched
+
+
+def hold_current_position(motors, dof: int) -> np.ndarray:
+    """현재 관절각을 전송하고 HOLD 모드로 토크를 유지한다.
+
+    B 소프트웨어 정지에서는 ``disable()``을 절대 호출하지 않는다.
+    소자는 CAN 피드백 유실 같은 실제 고장 경로에만 남겨 둔다.
+    """
+    actual = np.asarray(motors.read_positions(), dtype=float)
+    motors.hold()
+    motors.write_positions(actual, dq=np.zeros(dof), engaged=False)
+    return actual
 
 
 class ArmIK:
@@ -252,6 +276,8 @@ def main() -> int:
                     help="모터 출력. none=시뮬만, jetson=UDP 로 젯슨(또는 가짜 젯슨)에 지령")
     ap.add_argument("--jetson-host", type=str, default=None,
                     help="젯슨 주소. 생략하면 비컨(UDP 5007)으로 자동 탐색")
+    ap.add_argument("--no-home-on-xr-start", action="store_true",
+                    help="Start XR 직후 실물/시뮬 HOME 정렬을 생략한다")
     ap.add_argument("--no-viz", action="store_true", help=argparse.SUPPRESS)  # 하위호환
     args = ap.parse_args()
 
@@ -392,7 +418,8 @@ def main() -> int:
     else:
         print("  손목 롤      : 없음 (끝관절이 EE 자세를 안 바꿉니다)")
     print("  오른손 Grip 을 꾹 누른 채 팔을 움직이세요. 떼면 그 자리에 멈춥니다.")
-    print("  A=홈 복귀   B=기준 리셋   썸스틱X=손목 롤")
+    print("  A=홈 복귀   B=소프트웨어 정지(HOLD)   썸스틱X=손목 롤")
+    print("  B를 누르면 토크를 유지한 채 정지하며, 재가동은 프로그램 재시작으로만 가능합니다.")
     if hand is not None:
         print(f"  손: 트리거=쥐는 정도(0~1)  서보 {hand.n_servos}개 / 관절 {hand.n_joints}개")
     print("  [좌우가 반대로 느껴지면] 왼손 X=미러 토글, 왼손 Y=yaw +90°")
@@ -420,6 +447,9 @@ def main() -> int:
 
     wrist_roll = 0.0
     prev_left_x = prev_left_y = False
+    prev_right_a = False
+    prev_right_b = False
+    software_stopped = False
     last_print = 0.0
     # 모터: 실물 관절각으로 IK 시작점을 맞췄는가 / RUN 을 내보낼 자격이 있는가
     motor_synced = False
@@ -433,6 +463,11 @@ def main() -> int:
     loop_times: list[float] = []
     ik_times: list[float] = []
     connected_once = False
+    # 실물은 프로세스 실행만으로 움직이지 않는다. 조종자가 Quest에서 Start XR을
+    # 눌러 세션을 연 시점을 시작 승인으로 보고, 그때 한 번 HOME으로 정렬한다.
+    # 시뮬 전용 실행은 기존처럼 cfg.home에서 이미 시작하므로 별도 절차가 없다.
+    home_on_xr_start = motors is not None and not args.no_home_on_xr_start
+    homing = False
     period = 1.0 / args.rate
 
     while running:
@@ -505,7 +540,11 @@ def main() -> int:
 
         if not connected_once:
             connected_once = True
-            print("  ✅ Quest 연결됨 — Grip 을 눌러 조작을 시작하세요", flush=True)
+            homing = home_on_xr_start
+            if homing:
+                print("  ✅ Quest 연결됨 — J1/J2와 시뮬을 HOME으로 정렬합니다", flush=True)
+            else:
+                print("  ✅ Quest 연결됨 — Grip 을 눌러 조작을 시작하세요", flush=True)
 
         right = frame.right
 
@@ -525,13 +564,45 @@ def main() -> int:
                       f"(미러 {'ON' if clutch.mirror else 'off'})", flush=True)
             prev_left_x, prev_left_y = left.primary, left.secondary
 
-        # 버튼 처리
-        if right.primary:  # A — 홈 복귀
+        # 버튼 처리. B 는 다른 입력보다 먼저 처리하고, 한 번 걸리면
+        # 재시작 전까지 절대 재무장하지 않는다.
+        software_stopped, prev_right_b, newly_stopped = latch_software_stop(
+            software_stopped, bool(right.secondary), prev_right_b
+        )
+        if newly_stopped:
+            motor_armed = False
+            q_prev_cmd = None
+            clutch.reset()
+            if motors is not None:
+                hold_current_position(motors, cfg.dof)
+            print("\n  ⏸ B 소프트웨어 정지: 토크 유지 HOLD, 재시작 전까지 재무장 금지\n",
+                  flush=True)
+
+        if software_stopped:
+            st = idle_state(ik, cfg, scale, visual, np.linalg.inv(clutch.mapping))
+            st.update({
+                "quest": "ok",
+                "software_stop": True,
+                "receiver": receiver,
+                "motors": None if motors is None else motors.summary(),
+            })
+            if motors is not None:
+                hold_current_position(motors, cfg.dof)
+            source.publish_state(st)
+            time.sleep(period)
+            continue
+
+        a_pressed = bool(right.primary)
+        if a_pressed and not prev_right_a:  # A — 실물/시뮬 동기식 홈 복귀
             ik.set_q(cfg.home)
             clutch.reset()
             wrist_roll = 0.0
-        if right.secondary:  # B — 클러치 기준만 리셋
-            clutch.reset()
+            homing = motors is not None
+            motor_armed = False
+            q_prev_cmd = None
+            if homing:
+                print("  ⌂ A HOME 요청 — J1/J2를 제한 속도로 이동합니다", flush=True)
+        prev_right_a = a_pressed
 
         # 썸스틱 X → 손목 롤 오프셋. EE 자세에 더해 IK 가 풀도록 한다.
         # (elbow_yaw 를 직접 지령하지 않고 EE pose 추상화 안에 유지)
@@ -571,6 +642,12 @@ def main() -> int:
         t_ik = time.perf_counter()
         q, clamped = ik.solve(target)
         ik_times.append(time.perf_counter() - t_ik)
+
+        # HOME 중에는 Quest 변위보다 cfg.home 관절 목표가 우선이다. 실제 속도와
+        # 관절 한계는 젯슨 안전계층이 적용하며, 완료 전에는 일반 Grip 무장을 막는다.
+        if homing:
+            q = np.asarray(cfg.home, dtype=float).copy()
+            ik.set_q(q)
 
         # ── 모터 출력 ────────────────────────────────────────────────
         if motors is not None:
@@ -622,6 +699,8 @@ def main() -> int:
                     print(f"  ⏸ 무장 해제 ({why}) — 클러치를 다시 잡아야 움직입니다",
                           flush=True)
                 motor_armed = False
+            elif homing:
+                motor_armed = True
             elif engaged:
                 # ★ 무장하는 순간(비무장 → 무장) 지령을 실물 위치에 다시 맞춘다.
                 #
@@ -665,6 +744,19 @@ def main() -> int:
                 engaged=bool(engaged),
             )
 
+            if homing and jst is not None and jst.q:
+                q_real = np.asarray(jst.q, dtype=float)[: cfg.dof]
+                if home_reached(q_real, np.asarray(cfg.home, dtype=float)):
+                    homing = False
+                    motor_armed = False
+                    q_prev_cmd = None
+                    ik.set_q(cfg.home)
+                    home_ee = ik.fk()
+                    clutch.reset()
+                    motors.hold()
+                    motors.write_positions(q_real, dq=np.zeros(cfg.dof), engaged=False)
+                    print("  ✅ HOME 정렬 완료 — Grip 을 눌러 조작하세요", flush=True)
+
         if viz is not None:
             viz.display(ik.robot.state.q)
             robot_frame_viz(ik.robot, cfg.ee_frame)
@@ -700,6 +792,8 @@ def main() -> int:
             # 여기까지 왔다는 것은 이번 프레임에 컨트롤러 pose 가 들어왔다는 뜻이다.
             "quest": "ok",
             "engaged": bool(engaged),
+            "software_stop": False,
+            "homing": bool(homing),
             "mapping": {"yaw_deg": float(clutch.base_yaw_deg), "mirror": bool(clutch.mirror),
                         # 미러는 화면을 실물의 거울상으로 만든다. 손처럼 좌우가
                         # 구분되는 부품이 있으면 조작자가 엄지 위치를 반대로 인지한다.

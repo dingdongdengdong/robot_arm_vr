@@ -52,6 +52,17 @@ STATE_IDLE = "IDLE"          # 소자. 링크는 살아있음.
 STATE_HOLD = "HOLD"          # 여자, 자세 유지 중.
 STATE_RUN = "RUN"            # 여자, 추종 중.
 STATE_TRIP = "TRIP"          # 트립. clear_trip 없이는 안 풀린다.
+HOME_TOLERANCE_RAD = np.radians(2.0)
+
+
+def home_reached(actual: np.ndarray, target: np.ndarray,
+                 tolerance: float = HOME_TOLERANCE_RAD) -> bool:
+    """모든 활성 관절이 HOME 허용오차 안에 들어왔는지 확인한다."""
+    actual = np.asarray(actual, dtype=float)
+    target = np.asarray(target, dtype=float)
+    if actual.shape != target.shape or not np.isfinite(actual).all():
+        return False
+    return bool(np.abs(actual - target).max(initial=0.0) <= tolerance)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -104,7 +115,8 @@ class Command:
       학습에서 빼려면** 이 정보가 필요하다. 그 구간의 동작은 사람의 의도가
       아니라 "그냥 멈춰 있던 것"이다.
     """
-    # 손은 2차. 이번 차수에는 아예 안 보낸다 (None 이면 직렬화에서 빠진다).
+    # 손은 팔과 독립된 SCS0009 직렬 버스로 전달한다. servo 8개가 우선이고,
+    # 구형 수신기는 grasp 0..1만 사용해도 된다. None이면 직렬화에서 빠진다.
     grasp: float | None = None
     servo: list[float] | None = None
 

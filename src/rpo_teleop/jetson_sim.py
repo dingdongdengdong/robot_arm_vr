@@ -314,15 +314,24 @@ class FakeJetson:
             else:
                 el = time.monotonic() - self._enabled_at
                 ss = min(1.0, el / max(self.limits.soft_start_s, 1e-9))
-            # 가짜 온도 — 실물은 DM4340 피드백 프레임에서 나온다
-            # 미장착 관절은 None → 패킷에서 null. NaN 을 쓰면 JSON 이 깨진다.
-            temp = [35.0 + 5.0 * abs(float(v)) for v in actual] + \
-                   [None] * (self.n_joints - self.n_motors)
+            # 실물 백엔드는 직전 CAN 피드백의 속도·온도·오류를
+            # 반환한다. MockBackend 처럼 온도가 전부 NaN 인 경우만 기존
+            # 시뮬레이션 온도를 사용한다. 미장착 관절은 null 이다.
+            dq_hw = np.asarray(self.motors.read_velocities(), dtype=float)[:self.n_motors]
+            temp_hw = np.asarray(self.motors.read_temperatures(), dtype=float)[:self.n_motors]
+            err_hw = list(self.motors.read_errors())[:self.n_motors]
+            if temp_hw.size != self.n_motors or not np.isfinite(temp_hw).any():
+                temp_hw = np.asarray(
+                    [35.0 + 5.0 * abs(float(v)) for v in actual], dtype=float
+                )
+            dq = [float(v) for v in dq_hw] + [0.0] * (self.n_joints - self.n_motors)
+            temp = [float(v) for v in temp_hw] + [None] * (self.n_joints - self.n_motors)
+            err = [int(v) for v in err_hw] + [0] * (self.n_joints - self.n_motors)
             return State(
                 session=self.session, seq=self.last_seq, t=time.time(),
                 q=[float(v) for v in q],
-                dq=[0.0] * self.n_joints, tau=[0.0] * self.n_joints,
-                temp=temp, err=[0] * self.n_joints,
+                dq=dq, tau=[0.0] * self.n_joints,
+                temp=temp, err=err,
                 state=self.state, trip=self.trip,
                 rx_age_ms=age_ms, soft_start=ss, link=self._link,
                 await_rearm=self._await_rearm, robot=self.robot,
@@ -364,7 +373,25 @@ class FakeJetson:
         """★ control_hz(=1/dt) 고정. rate_hz 와 분리한다."""
         period = 1.0 / self.control_hz
         while not self._stop.is_set():
-            self._tick()
+            try:
+                self._tick()
+            except Exception as exc:
+                # CAN 피드백 유실 등으로 제어 스레드만 죽으면 rx/tx 루프는
+                # 계속 살아 있어 마치 정상인 것처럼 보인다. 즉시 TRIP
+                # 하고 소자해 재가동을 막는다.
+                reason = f"제어 피드백 장애: {type(exc).__name__}: {exc}"
+                with self._lock:
+                    self.trip = reason
+                    self.safety.trip(reason)
+                    self.state = STATE_TRIP
+                    self._await_rearm = True
+                    self.stats["trips"] += 1
+                    self._q_safe = None
+                try:
+                    self.motors.disable()
+                except Exception:
+                    pass
+                break
             time.sleep(period)
 
     def _tx_loop(self) -> None:

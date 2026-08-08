@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from rpo_teleop.hand_model import (  # noqa: E402
     MOUNT_RPY,
+    MOUNT_WORLD_Y_ROT_RAD,
     SERVO_CLOSE_DEG,
     SERVO_OPEN_DEG,
     HandModel,
@@ -142,7 +143,7 @@ def test_inverse_mapping_roundtrip():
 
 # ── 장착 변환 ─────────────────────────────────────────────────────────
 def test_mount_transform_orientation(hand):
-    """손 +Z 가 손가락 방향(월드 +Z), 손 +X 가 손바닥(월드 +Y).
+    """SuperArm HOME에서 현재 손을 world Y축으로 +90도 회전한다.
 
     이게 틀리면 손이 90° 돌아간 채 달린다. 기구 담당자 문서의 핵심 검산값.
     """
@@ -150,13 +151,21 @@ def test_mount_transform_orientation(hand):
 
     from rpo_teleop.arm_visual import rpy_to_matrix
 
-    arm = placo.RobotWrapper(str(ROOT / "assets" / "robot_arm" / "robot_arm.urdf"))
+    arm = placo.RobotWrapper(
+        str(ROOT / "assets" / "superarm_j1_j2" / "superarm_j1_j2.urdf")
+    )
     arm.update_kinematics()
     T_mount = arm.get_T_world_frame("hand_mount")
-    R = T_mount[:3, :3] @ rpy_to_matrix(MOUNT_RPY)
+    R = (
+        T_mount[:3, :3]
+        @ rpy_to_matrix((0.0, MOUNT_WORLD_Y_ROT_RAD, 0.0))
+        @ rpy_to_matrix(MOUNT_RPY)
+    )
 
-    assert np.allclose(R[:, 2], [0, 0, 1], atol=1e-6), f"손 +Z → {R[:, 2]}"
-    assert np.allclose(R[:, 0], [0, 1, 0], atol=1e-6), f"손 +X → {R[:, 0]}"
+    assert np.allclose(R[:, 0], [1, 0, 0], atol=1e-6), f"손바닥 +X → {R[:, 0]}"
+    assert np.allclose(R[:, 1], [0, 0, 1], atol=1e-6), f"손 +Y → {R[:, 1]}"
+    assert np.allclose(R[:, 2], [0, -1, 0], atol=1e-6), f"손가락 +Z → {R[:, 2]}"
+    assert np.isclose(MOUNT_WORLD_Y_ROT_RAD, np.pi / 2)
 
 
 def test_mount_height_checksum(hand):

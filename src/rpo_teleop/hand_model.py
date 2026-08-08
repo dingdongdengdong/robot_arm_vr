@@ -45,10 +45,13 @@ SERVO_CLOSE_DEG = np.array([90, -90, 90, -90, 90, -90, 90, -90], dtype=float)
 # 손가락 이름 (f4 가 엄지)
 FINGER_NAMES = ["index", "middle", "ring", "thumb"]
 
-# 팔 hand_mount → 손 hand_base 장착 변환 (기구 담당자 제공, 검산 완료)
-#   검증: 관절각 0 에서 hand_mount 높이 533.3 mm, 손 +Z→월드 +Z, 손 +X→월드 +Y
+# 팔 hand_mount → 손 hand_base 장착 변환 (기구 담당자 제공, 검산 완료).
+# SuperArm HOME에서는 hand_mount 축과 world 축이 같으므로 사용자가 지정한
+# world Y(+90°) 보정을 기본 RPY 앞에 곱한다. 최종 축은 손 +X=world +X,
+# 손 +Y=world +Z, 손가락 진행축 +Z=world -Y 이다.
 MOUNT_XYZ = np.array([0.0, 0.0, 0.0])
 MOUNT_RPY = np.array([1.570796327, -1.570796327, 0.0])
+MOUNT_WORLD_Y_ROT_RAD = np.pi / 2
 
 
 def grasp_to_servo(t: float | np.ndarray) -> np.ndarray:

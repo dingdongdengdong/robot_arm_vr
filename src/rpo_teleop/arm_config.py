@@ -29,6 +29,31 @@ EE_FRAME_CANDIDATES = [
 CONTINUOUS_LIMIT = np.pi  # limit 태그가 없는 continuous 관절에 씌울 범위
 
 
+
+def safe_reach_bounds(reach: np.ndarray, margin: float) -> tuple[float, float]:
+    """샘플링한 리치에서 서로 역전되지 않는 (min, max) 범위를 만든다.
+
+    2-DOF 팔처럼 작업공간이 얇은 구면이면 2-percentile 최소 리치가
+    ``raw_max * reach_margin`` 보다 클 수 있다. 그 상태를 그대로 저장하면
+    ``np.clip(r, min_reach, max_reach)`` 구간이 거꾸로 되어 모든 목표가 튄다.
+    마진을 적용할 수 없을 만큼 얇은 경우에는 실측 최대값을 쓴다.
+    """
+    reach = np.asarray(reach, dtype=float)
+    if reach.size == 0 or not np.all(np.isfinite(reach)):
+        raise ValueError("reach must contain finite samples")
+    if not 0.0 < margin <= 1.0:
+        raise ValueError("reach margin must be in (0, 1]")
+
+    raw_max = float(reach.max())
+    raw_min = float(np.percentile(reach, 2))
+    max_reach = raw_max * margin
+    if max_reach <= raw_min:
+        max_reach = raw_max
+    min_reach = max(raw_min, max_reach * 0.15)
+    min_reach = min(min_reach, max_reach * 0.98)
+    return float(min_reach), float(max_reach)
+
+
 @dataclass
 class ArmConfig:
     """한 팔의 기구학 설정. URDF 에서 도출된다."""
@@ -218,11 +243,10 @@ class ArmConfig:
             pts[i] = robot.get_T_world_frame(self.ee_frame)[:3, 3]
 
         reach = np.linalg.norm(pts - self.shoulder, axis=1)
-        self.max_reach = float(reach.max() * self.reach_margin)
         # 최소 리치: 접힌 자세는 특이점·자기충돌이 몰려 있어 하위 구간을 잘라낸다.
-        # 측정 최소값이 0 에 가까울 수 있으므로(베이스 회전축 위) 최대 리치 대비
-        # 하한도 함께 건다.
-        self.min_reach = float(max(np.percentile(reach, 2), self.max_reach * 0.15))
+        # 2-DOF 얇은 작업공간에서 reach_margin 때문에 min > max 가 되지 않게
+        # 상·하한을 함께 계산한다.
+        self.min_reach, self.max_reach = safe_reach_bounds(reach, self.reach_margin)
         self.workspace_min = pts.min(0).tolist()
         self.workspace_max = pts.max(0).tolist()
 

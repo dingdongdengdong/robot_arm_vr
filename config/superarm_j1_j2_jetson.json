@@ -1,0 +1,52 @@
+{
+  "urdf_path": "/home/dong/echo_v4/third_party/robot_arm_vr/assets/superarm_j1_j2/superarm_j1_j2.urdf",
+  "ee_frame": "hand_mount",
+  "joint_names": [
+    "joint_rev_1",
+    "joint_rev_2"
+  ],
+  "lower": [
+    -3.197146562905317,
+    -1.8345159075303288
+  ],
+  "upper": [
+    3.1033035782406344,
+    1.5022507057297627
+  ],
+  "effort": [
+    27.0,
+    27.0
+  ],
+  "velocity": [
+    3.77,
+    3.77
+  ],
+  "base_frame": "base_link",
+  "shoulder_pos": [
+    -0.035112,
+    0.28264899999999993,
+    0.076269
+  ],
+  "max_reach": 0.5214999999441314,
+  "min_reach": 0.4579275824236268,
+  "workspace_min": [
+    -0.5005390661189314,
+    -0.18268985959610723,
+    0.011087535510777985
+  ],
+  "workspace_max": [
+    0.43030733714957015,
+    0.7480847667081751,
+    0.5977689994797246
+  ],
+  "home_q": [
+    0.0,
+    0.0
+  ],
+  "home_condition": 465500000000.00006,
+  "total_mass": 7.465724625774957,
+  "human_reach": 0.65,
+  "reach_margin": 0.86,
+  "control_dt": 0.05,
+  "position_rank": 2
+}

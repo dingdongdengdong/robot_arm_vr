@@ -183,11 +183,17 @@ class ArmVisual:
         self.hand_mount_R = None
         self.hand_visuals = {}
         if hand is not None:
-            from .hand_model import MOUNT_RPY, MOUNT_XYZ
+            from .hand_model import MOUNT_RPY, MOUNT_WORLD_Y_ROT_RAD, MOUNT_XYZ
             hu = hand_urdf or hand.urdf_path
             self.hand_boxes = extract_link_boxes(hu)
             self.hand_visuals = extract_link_visuals(hu, "/mesh/hand")
-            self.hand_mount_R = rpy_to_matrix(MOUNT_RPY)
+            # 사용자가 지정한 Yw +90°는 현재 손 로컬축 회전이 아니라
+            # SuperArm HOME의 world/mount Y축 회전이다. 따라서 기본 장착 RPY
+            # 앞에 곱한다. 뒤에 곱하면 hand Y축 회전이 되어 결과가 달라진다.
+            self.hand_mount_R = (
+                rpy_to_matrix((0.0, MOUNT_WORLD_Y_ROT_RAD, 0.0))
+                @ rpy_to_matrix(MOUNT_RPY)
+            )
             self.hand_mount_t = np.asarray(MOUNT_XYZ, dtype=float)
         self.boxes = extract_link_boxes(urdf_path)
         self.visuals = extract_link_visuals(urdf_path, "/mesh/arm")

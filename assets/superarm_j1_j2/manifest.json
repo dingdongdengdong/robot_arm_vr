@@ -1,0 +1,21 @@
+{
+  "calibration": "/home/dong/echo_v4/config/right_arm_two_motor.json",
+  "calibration_captured_at": "2026-08-08T09:41:00.680425+00:00",
+  "ee_frame": "hand_mount",
+  "fixed_arm_joints": [
+    "joint_rev_3",
+    "joint_rev_4",
+    "joint_fix_28"
+  ],
+  "link_count": 19,
+  "mesh_count": 18,
+  "movable_joints": [
+    "joint_rev_1",
+    "joint_rev_2"
+  ],
+  "schema_version": 1,
+  "source_archive": "/home/dong/echo/superarm_ws/robot_arm_hand_package.zip",
+  "source_archive_sha256": "c10c91ac240ac18893ab0a102e2ac6f9aa8a6a2e75c738fe6209f2d50a122b4a",
+  "urdf": "/home/dong/echo_v4/third_party/robot_arm_vr/assets/superarm_j1_j2/superarm_j1_j2.urdf",
+  "urdf_sha256": "b77f99206a4284f48840e007cc1843a82498e63ba092f631d909b7ab3cc94a96"
+}

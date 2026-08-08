@@ -471,6 +471,11 @@ let ctrlMarkers = { left: null, right: null };
 // 실제 팔이 책상 위에 있는 상황을 기본값으로 잡는다 (책상 높이 ~0.8 m).
 const STAGE_DEFAULT = { x: 0, y: 0.80, z: -0.55 };
 
+function resetStage() {
+  if (!stage) return;
+  stage.position.set(STAGE_DEFAULT.x, STAGE_DEFAULT.y, STAGE_DEFAULT.z);
+}
+
 async function initRenderer(session) {
   renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
   renderer.setPixelRatio(1);        // 헤드셋에서는 1 이 프레임에 유리
@@ -487,11 +492,13 @@ async function initRenderer(session) {
   addLights(scene);
 
   stage = new THREE.Group();
-  stage.position.set(STAGE_DEFAULT.x, STAGE_DEFAULT.y, STAGE_DEFAULT.z);
+  resetStage();
   scene.add(stage);
 
-  // Quest 는 팔+손 331k 삼각형이 부담이라 기본은 박스다. ?mesh=1 로 켤 수 있다.
-  const useMeshes = new URLSearchParams(location.search).get("mesh") === "1";
+  // VR에서도 URDF의 실제 STL 형상을 기본으로 그린다. 박스는 링크 구조나 성능을
+  // 진단할 때만 ?mesh=0 으로 명시해서 사용한다. 서버가 전달하는 scale과 visual
+  // origin을 그대로 적용하므로 대시보드와 Quest가 같은 SuperArm/손 shell을 본다.
+  const useMeshes = new URLSearchParams(location.search).get("mesh") !== "0";
   robotView = new RobotView(stage, { useMeshes });
 
   for (const side of ["left", "right"]) {
@@ -534,7 +541,7 @@ function updateSceneFromInput(p) {
       if (lg.grip > 0.5) stage.position.y = Math.max(0.1, stage.position.y - sy * 0.008);
       else stage.position.z += sy * 0.006;
     }
-    if (lg.stickPress) stage.position.set(STAGE_DEFAULT.x, STAGE_DEFAULT.y, STAGE_DEFAULT.z);
+    if (lg.stickPress) resetStage();
   }
 
   // 왼손 트리거 = 트립 해제. 트립 중이고 링크가 살아있을 때만 나간다.

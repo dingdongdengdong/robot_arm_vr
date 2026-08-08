@@ -69,6 +69,19 @@ def wait_until(pred, timeout=3.0, period=0.02):
     return False
 
 
+class FeedbackFailureBackend:
+    """제어 루프에서 CAN 피드백 유실을 재현한다."""
+
+    def __init__(self) -> None:
+        self.disable_calls = 0
+
+    def read_positions(self):
+        raise ConnectionError("lost raw feedback from motor 1")
+
+    def disable(self):
+        self.disable_calls += 1
+
+
 @pytest.fixture
 def link(request):
     """가짜 젯슨 + 백엔드 한 쌍. 테스트마다 포트를 달리해 격리한다."""
@@ -154,6 +167,31 @@ def test_state_and_beacon_roundtrip():
 
 
 # ── 상태머신 ───────────────────────────────────────────────────────────
+def test_control_feedback_failure_trips_and_disables() -> None:
+    cmd, state, beacon = free_ports(3)
+    jet = FakeJetson(
+        lower=LOWER,
+        upper=UPPER,
+        max_velocity=VMAX,
+        n_joints=3,
+        n_motors=2,
+        cmd_port=cmd,
+        state_port=state,
+        beacon_port=beacon,
+        host="127.0.0.1",
+    )
+    backend = FeedbackFailureBackend()
+    jet.motors = backend
+
+    jet._control_loop()
+
+    assert jet.state == STATE_TRIP
+    assert jet._await_rearm is True
+    assert "lost raw feedback from motor 1" in jet.trip
+    assert jet.stats["trips"] == 1
+    assert backend.disable_calls == 1
+
+
 def test_hold_then_run_tracks_target(link):
     be, jet = link
     be.hold()

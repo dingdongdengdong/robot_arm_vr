@@ -33,6 +33,48 @@ _spec.loader.exec_module(sim)
 CONFIGS = [ROOT / "config" / "arm.json", ROOT / "config" / "arm_temp.json"]
 
 
+def test_b_button_software_stop_is_rising_edge_and_latched() -> None:
+    latched = previous = False
+    latched, previous, newly = sim.latch_software_stop(latched, True, previous)
+    assert latched and previous and newly
+
+    latched, previous, newly = sim.latch_software_stop(latched, False, previous)
+    assert latched and not previous and not newly
+
+    latched, previous, newly = sim.latch_software_stop(latched, True, previous)
+    assert latched and previous and not newly
+
+
+def test_b_button_software_stop_holds_without_disabling() -> None:
+    class Motors:
+        def __init__(self) -> None:
+            self.hold_calls = 0
+            self.disable_calls = 0
+            self.writes = []
+
+        def read_positions(self):
+            return np.array([0.2, -0.3])
+
+        def hold(self):
+            self.hold_calls += 1
+
+        def disable(self):
+            self.disable_calls += 1
+
+        def write_positions(self, q, **kwargs):
+            self.writes.append((np.asarray(q), kwargs))
+
+    motors = Motors()
+    actual = sim.hold_current_position(motors, 2)
+
+    assert np.allclose(actual, [0.2, -0.3])
+    assert motors.hold_calls == 1
+    assert motors.disable_calls == 0
+    assert np.allclose(motors.writes[0][0], actual)
+    assert np.allclose(motors.writes[0][1]["dq"], np.zeros(2))
+    assert motors.writes[0][1]["engaged"] is False
+
+
 @pytest.fixture(params=CONFIGS, ids=lambda p: p.stem)
 def arm(request):
     if not request.param.exists():
