@@ -278,6 +278,8 @@ def main() -> int:
                     help="젯슨 주소. 생략하면 비컨(UDP 5007)으로 자동 탐색")
     ap.add_argument("--no-home-on-xr-start", action="store_true",
                     help="Start XR 직후 실물/시뮬 HOME 정렬을 생략한다")
+    ap.add_argument("--disable-home-button", action="store_true",
+                    help="오른손 A의 HOME 이동을 비활성화한다")
     ap.add_argument("--no-viz", action="store_true", help=argparse.SUPPRESS)  # 하위호환
     args = ap.parse_args()
 
@@ -392,7 +394,7 @@ def main() -> int:
     if viz is not None:
         print(f"  3D 뷰       : {viz_url}")
     print(f"  대시보드    : {source.url}/dashboard   (관절 한계 실시간 표시)")
-    print(f"  프로파일    : {args.profile}   웹 {pf.web}  UDP 지령/상태/비컨 "
+    print(f"  프로파일    : {args.profile}   웹 {web_port}  UDP 지령/상태/비컨 "
           f"{pf.cmd}/{pf.state}/{pf.beacon}")
     print(f"  로봇        : {Path(cfg.urdf_path).name}  {cfg.dof}-DOF  EE={cfg.ee_frame}")
     print(f"  제어 주기   : {args.rate:.0f} Hz   스케일 {scale:.3f}   "
@@ -418,7 +420,8 @@ def main() -> int:
     else:
         print("  손목 롤      : 없음 (끝관절이 EE 자세를 안 바꿉니다)")
     print("  오른손 Grip 을 꾹 누른 채 팔을 움직이세요. 떼면 그 자리에 멈춥니다.")
-    print("  A=홈 복귀   B=소프트웨어 정지(HOLD)   썸스틱X=손목 롤")
+    home_label = "A=비활성" if args.disable_home_button else "A=홈 복귀"
+    print(f"  {home_label}   B=소프트웨어 정지(HOLD)   썸스틱X=손목 롤")
     print("  B를 누르면 토크를 유지한 채 정지하며, 재가동은 프로그램 재시작으로만 가능합니다.")
     if hand is not None:
         print(f"  손: 트리거=쥐는 정도(0~1)  서보 {hand.n_servos}개 / 관절 {hand.n_joints}개")
@@ -592,7 +595,7 @@ def main() -> int:
             time.sleep(period)
             continue
 
-        a_pressed = bool(right.primary)
+        a_pressed = bool(right.primary) and not args.disable_home_button
         if a_pressed and not prev_right_a:  # A — 실물/시뮬 동기식 홈 복귀
             ik.set_q(cfg.home)
             clutch.reset()
