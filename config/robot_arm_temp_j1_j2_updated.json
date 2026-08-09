@@ -1,0 +1,52 @@
+{
+  "urdf_path": "/home/dong/echo_v4/third_party/robot_arm_vr/assets/robot_arm_temp_j1_j2_updated/robot_arm_temp_j1_j2_updated.urdf",
+  "ee_frame": "hand_mount",
+  "joint_names": [
+    "joint1",
+    "joint2"
+  ],
+  "lower": [
+    -3.106686069,
+    -1.745329252
+  ],
+  "upper": [
+    3.106686069,
+    1.745329252
+  ],
+  "effort": [
+    27.0,
+    27.0
+  ],
+  "velocity": [
+    3.77,
+    3.77
+  ],
+  "base_frame": "base_link",
+  "shoulder_pos": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "max_reach": 0.2532729926836651,
+  "min_reach": 0.23712445827862916,
+  "workspace_min": [
+    -0.2380952902941928,
+    -0.23836196947489727,
+    0.014672861549389252
+  ],
+  "workspace_max": [
+    0.23832004674795554,
+    0.2384787547247294,
+    0.29450347928859977
+  ],
+  "home_q": [
+    0.11529910815585964,
+    -1.4788114150807858
+  ],
+  "home_condition": 1.0042455785542583,
+  "total_mass": 1.412682814,
+  "human_reach": 0.65,
+  "reach_margin": 0.86,
+  "control_dt": 0.03333333333333333,
+  "position_rank": 2
+}
