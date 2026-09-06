@@ -48,7 +48,8 @@
       <tr><th>입력</th><th>매핑</th></tr>
       <tr><td>오른손 <b>Grip</b> (중지)</td><td><code>move</code> — 팔 추종 활성화 (clutch)</td></tr>
       <tr><td>오른손 <b>Trigger</b> (검지)</td><td><code>right.trigger</code> — 0.0~1.0 아날로그, 손 쥐기</td></tr>
-      <tr><td>오른손 <b>A / B</b></td><td><code>reservedButtonA / B</code></td></tr>
+      <tr><td>오른손 <b>A</b> (홈 버튼)</td><td>AmazingHand grasp on/off. 끄면 트리거를 무시하고 마지막 쥐기 유지</td></tr>
+      <tr><td>오른손 <b>B</b></td><td>소프트웨어 HOLD</td></tr>
       <tr><td>오른손 <b>썸스틱</b></td><td><code>right.stick</code> — axes[2],[3]</td></tr>
       <tr><td>왼손 <b>썸스틱</b></td><td>가상 로봇 위치 이동 (grip 잡고 밀면 높이) · 누르면 리셋</td></tr>
       <tr><td>왼손 <b>X / Y</b></td><td>좌표 매핑 — 미러 토글 / yaw +90°</td></tr>
@@ -390,6 +391,11 @@ function updateHUD(p) {
       const m = robotState.mapping;
       lines.push(`map   yaw ${m.yaw_deg.toFixed(0)}°  mirror ${m.mirror ? "ON" : "off"}   (좌X=미러 좌Y=yaw)`);
       if (m.chirality_warning) lines.push("⚠ 거울상 — 오른손이 왼손으로 보입니다");
+    }
+    if (robotState.hand) {
+      const h = robotState.hand;
+      const on = h.enabled !== false;
+      lines.push(`hand  grasp ${on ? "ON " : "OFF"}  ${(h.grasp ?? 0).toFixed(2)}   (오른손 A=on/off)`);
     }
     if (robotState.reach) {
       const r = robotState.reach;
