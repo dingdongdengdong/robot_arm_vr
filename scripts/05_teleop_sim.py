@@ -13,8 +13,8 @@ Quest 오른손 컨트롤러로 가상의 RPO 팔을 실제로 조종해 본다.
 
 조작 (오른손 컨트롤러):
     Grip(중지) 꾹    팔 추종 활성화. 떼면 그 자리에 정지, 다시 잡으면 이어서 조작
-    Trigger(검지)    손 쥐는 정도 0~1 (AmazingHand grasp, A가 ON일 때만)
-    A                AmazingHand grasp on/off 토글 (Quest 오른쪽 홈 버튼). 끄면 마지막 쥐기 유지
+    Trigger(검지)    집게(tongs) 엔드이펙터 0~1
+    A                AmazingHand 폄/쥠 (Quest 오른쪽 홈 버튼)
     B                소프트웨어 정지 래치(토크를 유지한 채 HOLD)
     썸스틱 X         손목 롤(elbow_yaw) 오프셋
 
@@ -40,7 +40,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from rpo_teleop.arm_config import ArmConfig  # noqa: E402
 from rpo_teleop.certs import get_local_ip, list_local_ips  # noqa: E402
-from rpo_teleop.grasp_enable import gated_grasp, toggle_grasp_enable  # noqa: E402
+from rpo_teleop.grasp_enable import (  # noqa: E402
+    amazing_hand_grasp, tongs_grasp, toggle_on_rising_edge)
 from rpo_teleop.hand_model import HandModel, grasp_to_servo  # noqa: E402
 from rpo_teleop.jetson_link import (  # noqa: E402
     STATE_TRIP, JetsonBackend, check_robot_match, home_reached)
@@ -280,7 +281,7 @@ def main() -> int:
     ap.add_argument("--no-home-on-xr-start", action="store_true",
                     help="Start XR 직후 실물/시뮬 HOME 정렬을 생략한다")
     ap.add_argument("--disable-home-button", action="store_true",
-                    help="오른손 A의 HOME 이동을 비활성화한다. A는 AmazingHand grasp on/off 토글로 남는다")
+                    help="오른손 A의 팔 HOME 이동을 비활성화한다. A는 AmazingHand 폄/쥠으로 남는다")
     ap.add_argument("--no-viz", action="store_true", help=argparse.SUPPRESS)  # 하위호환
     args = ap.parse_args()
 
@@ -424,11 +425,9 @@ def main() -> int:
     home_label = "A=비활성(홈)" if args.disable_home_button else "A=홈 복귀"
     print(f"  {home_label}   B=소프트웨어 정지(HOLD)   썸스틱X=손목 롤")
     print("  B를 누르면 토크를 유지한 채 정지하며, 재가동은 프로그램 재시작으로만 가능합니다.")
+    print("  손: A(홈 버튼)=AmazingHand 폄/쥠  검지 트리거=집게(tongs)")
     if hand is not None:
-        print(
-            "  손: 트리거=쥐는 정도(0~1)  A(홈 버튼)=grasp on/off  "
-            f"서보 {hand.n_servos}개 / 관절 {hand.n_joints}개"
-        )
+        print(f"  손 모델: 서보 {hand.n_servos}개 / 관절 {hand.n_joints}개")
     print("  [좌우가 반대로 느껴지면] 왼손 X=미러 토글, 왼손 Y=yaw +90°")
     print(f"  현재 매핑: yaw {args.base_yaw:.0f}°  mirror {'ON' if args.mirror else 'off'}")
     if args.mirror:
@@ -458,8 +457,8 @@ def main() -> int:
     prev_right_a_raw = False
     prev_right_b = False
     software_stopped = False
-    grasp_enabled = True
-    held_grasp = 0.0
+    hand_closed = False
+    prev_hand_closed = False
     last_print = 0.0
     # 모터: 실물 관절각으로 IK 시작점을 맞췄는가 / RUN 을 내보낼 자격이 있는가
     motor_synced = False
@@ -623,29 +622,23 @@ def main() -> int:
             wrist_roll = float(np.clip(wrist_roll + right.stick[0] * 0.03,
                                        roll_lo, roll_hi))
 
-        # 트리거(0~1) → 손 쥐는 정도.
-        # ★ 반드시 서보 공간에서 보간한다. 관절 공간 보간은 중간에서 최대 11.44°
-        #   어긋난다 (직접 검증). grasp_to_servo() 가 그 처리를 한다.
-        # B 는 팔 HOLD 에 쓰이므로 손 프리셋에 겹쳐 쓰지 않는다.
-        # 오른손 A(홈 버튼)는 AmazingHand grasp 제어 on/off 토글이다. 꺼져 있으면
-        # 트리거를 무시하고 마지막 쥐기 값을 유지한다. 홈 이동은
-        # --disable-home-button 으로 따로 막는다.
-        if hand is not None:
-            prev_grasp_enabled = grasp_enabled
-            grasp_enabled, prev_right_a_raw = toggle_grasp_enable(
-                grasp_enabled, a_raw, prev_right_a_raw
+        # 트리거(검지) → 집게(tongs) 엔드이펙터.
+        # 오른손 A(홈 버튼) → AmazingHand 폄/쥠. 트리거와 섞지 않는다.
+        # 팔 홈 이동은 --disable-home-button 으로 따로 막는다.
+        # 시각 손 모델이 없어도 A는 UDP hand_grasp 로 실물 AmazingHand 를 연다/닫는다.
+        hand_closed, prev_right_a_raw = toggle_on_rising_edge(
+            hand_closed, a_raw, prev_right_a_raw
+        )
+        if hand_closed != prev_hand_closed:
+            print(
+                f"  AmazingHand {'CLOSED' if hand_closed else 'OPEN'}",
+                flush=True,
             )
-            if grasp_enabled != prev_grasp_enabled:
-                print(
-                    f"  AmazingHand grasp {'ON' if grasp_enabled else 'OFF'}",
-                    flush=True,
-                )
-        else:
-            prev_right_a_raw = a_raw
-        grasp = gated_grasp(float(right.trigger), grasp_enabled, held_grasp)
-        held_grasp = grasp
+            prev_hand_closed = hand_closed
+        tongs = tongs_grasp(float(right.trigger))
+        hand_grasp = amazing_hand_grasp(hand_closed)
         if hand is not None:
-            hand.set_grasp(grasp)
+            hand.set_grasp(hand_grasp)
 
         engaged, delta_pos, rel_rotvec = clutch.update(
             right.position, right.rotation_matrix, right.grip, clamp_fn=clamp_delta
@@ -752,9 +745,8 @@ def main() -> int:
                 motors.enable()      # mode=RUN. 클러치를 떼도 RUN 을 유지하고
             else:                    #   목표만 얼린다 (소자하면 팔이 떨어진다)
                 motors.hold()
-            # ★ 손은 반드시 **서보각 8개**로 보낸다. 관절각으로 보내면 실물에
-            #   없는 자세가 나온다 (30_AGREED A-7). grasp 도 같이 실어서 받는
-            #   쪽이 서보를 못 쓰는 경우에 대비한다 — servo 가 우선한다.
+            # ★ AmazingHand 시각 모델은 서보각 8개. 실물 손은 hand_grasp(A)를
+            #   쓴다. grasp 는 집게(tongs, 검지 트리거)라서 손을 움직이면 안 된다.
             # ★ 지령 속도(dq)를 같이 보낸다. 없으면 받는 쪽이 v_des=0 을 넣게
             #   되고, 그러면 kd 항이 로봇의 자기 움직임에 제동을 건다
             #   (실측 -2.26 N·m, 브레이크어웨이보다 큼).
@@ -763,8 +755,9 @@ def main() -> int:
             q_prev_cmd = q.copy()
             motors.write_positions(
                 q, dq=dq_cmd,
-                grasp=None if hand is None else float(grasp),
-                servo=None if hand is None else grasp_to_servo(grasp),
+                grasp=float(tongs),
+                servo=None if hand is None else grasp_to_servo(hand_grasp),
+                hand_grasp=float(hand_grasp),
                 # ★ 받는 쪽은 클러치를 모른다. 데이터셋에서 조작자가 손을 뗀
                 #   구간을 학습에서 빼려면 이 정보가 필요하다.
                 engaged=bool(engaged),
@@ -825,11 +818,13 @@ def main() -> int:
                         # 구분되는 부품이 있으면 조작자가 엄지 위치를 반대로 인지한다.
                         "chirality_warning": bool(clutch.mirror and hand is not None)},
             "trigger": float(right.trigger),
-            "hand": None if hand is None else {
-                "grasp": float(grasp),
-                "enabled": bool(grasp_enabled),
-                "servo_deg": [round(float(v), 1) for v in np.degrees(grasp_to_servo(grasp))],
-                "n_servo": hand.n_servos, "n_joint": hand.n_joints,
+            "tongs": {"grasp": float(tongs)},
+            "hand": {
+                "grasp": float(hand_grasp),
+                "closed": bool(hand_closed),
+                "servo_deg": [round(float(v), 1) for v in np.degrees(grasp_to_servo(hand_grasp))],
+                "n_servo": None if hand is None else hand.n_servos,
+                "n_joint": None if hand is None else hand.n_joints,
             },
             "motors": None if motors is None else motors.summary(),
             # ★ 실제 관절각. 지금까지 화면은 IK 목표만 그려서, 모터가 부하에
@@ -872,8 +867,9 @@ def main() -> int:
                 f"target [{target[0,3]:+.3f} {target[1,3]:+.3f} {target[2,3]:+.3f}] "
                 f"| ee err {err*1000:5.1f} mm "
                 f"| q(deg) [{' '.join(f'{np.degrees(v):+6.1f}' for v in q)}] "
-                f"| trig {right.trigger:.2f} grasp {'ON' if grasp_enabled else 'OFF'} "
-                f"{grasp:.2f} roll {np.degrees(wrist_roll):+5.1f}° "
+                f"| trig {right.trigger:.2f} tongs {tongs:.2f} "
+                f"hand {'CLOSED' if hand_closed else 'OPEN'} "
+                f"roll {np.degrees(wrist_roll):+5.1f}° "
                 f"| ik {np.mean(ik_times[-60:])*1000:.2f}ms loop {hz:.0f}Hz",
                 flush=True,
             )

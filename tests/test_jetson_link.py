@@ -143,9 +143,20 @@ def test_command_roundtrip():
 
 
 def test_command_omits_hand_fields_when_unused():
-    """손은 2차. 이번 차수엔 grasp/servo 를 아예 보내지 않는다."""
+    """손은 2차. 이번 차수엔 grasp/servo/hand_grasp 를 아예 보내지 않는다."""
     raw = Command(session=1, seq=1, t=0.0, q=[0, 0, 0]).to_bytes().decode()
-    assert "grasp" not in raw and "servo" not in raw
+    assert "grasp" not in raw and "servo" not in raw and "hand_grasp" not in raw
+
+
+def test_command_roundtrip_keeps_tongs_and_hand_grasp_separate():
+    c = Command(session=1, seq=2, t=0.0, mode=MODE_RUN, q=[0.1, 0.0, 0.0],
+                grasp=0.3, hand_grasp=1.0)
+    got = Command.from_bytes(c.to_bytes())
+    assert got.grasp == pytest.approx(0.3)
+    assert got.hand_grasp == pytest.approx(1.0)
+    raw = c.to_bytes().decode()
+    assert '"grasp":0.3' in raw
+    assert '"hand_grasp":1.0' in raw
 
 
 def test_legacy_enable_false_means_hold_not_disabled():

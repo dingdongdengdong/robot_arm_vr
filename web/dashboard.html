@@ -352,11 +352,13 @@ function render(s) {
          s.ik_err_mm > 5 ? "warn" : "good"),
     card("루프", s.loop_hz != null ? `${s.loop_hz.toFixed(0)} Hz` : "—",
          s.loop_hz != null && s.loop_hz < 20 ? "warn" : ""),
-    card("트리거", s.trigger != null ? s.trigger.toFixed(2) : "—", ""),
-    card("손 grasp", s.hand
-         ? `${s.hand.enabled === false ? "OFF" : "ON"} ${(s.hand.grasp ?? 0).toFixed(2)}`
+    card("집게 tongs", s.tongs && s.tongs.grasp != null
+         ? s.tongs.grasp.toFixed(2)
+         : (s.trigger != null ? s.trigger.toFixed(2) : "—"), ""),
+    card("AmazingHand", s.hand
+         ? `${s.hand.closed === true || (s.hand.grasp ?? 0) >= 0.5 ? "CLOSED" : "OPEN"} ${(s.hand.grasp ?? 0).toFixed(2)}`
          : "—",
-         s.hand && s.hand.enabled === false ? "warn" : ""),
+         s.hand && (s.hand.closed === true || (s.hand.grasp ?? 0) >= 0.5) ? "good" : ""),
     card("좌표 매핑", s.mapping
          ? `yaw ${s.mapping.yaw_deg.toFixed(0)}° ${s.mapping.mirror ? "· 미러" : ""}`
          : "—", s.mapping && s.mapping.mirror ? "warn" : ""),

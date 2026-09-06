@@ -115,10 +115,12 @@ class Command:
       학습에서 빼려면** 이 정보가 필요하다. 그 구간의 동작은 사람의 의도가
       아니라 "그냥 멈춰 있던 것"이다.
     """
-    # 손은 팔과 독립된 SCS0009 직렬 버스로 전달한다. servo 8개가 우선이고,
-    # 구형 수신기는 grasp 0..1만 사용해도 된다. None이면 직렬화에서 빠진다.
+    # grasp = 집게(tongs) 엔드이펙터, 오른손 검지 트리거 0..1.
+    # hand_grasp = AmazingHand, 오른손 A/홈 버튼 0(폄) 또는 1(쥠).
+    # servo 8개는 AmazingHand 시각 모델. hand_grasp 가 있으면 실물 손은 그걸 쓴다.
     grasp: float | None = None
     servo: list[float] | None = None
+    hand_grasp: float | None = None
 
     def to_bytes(self) -> bytes:
         d = {"session": self.session, "seq": self.seq, "t": round(self.t, 4),
@@ -132,6 +134,8 @@ class Command:
             d["grasp"] = float(self.grasp)
         if self.servo is not None:
             d["servo"] = _nums(self.servo, 6)
+        if self.hand_grasp is not None:
+            d["hand_grasp"] = float(self.hand_grasp)
         return json.dumps(d, separators=(",", ":"), allow_nan=False).encode()
 
     @classmethod
@@ -148,7 +152,8 @@ class Command:
                    clear_trip=bool(d.get("clear_trip", False)),
                    dq=d.get("dq"),
                    engaged=(None if d.get("engaged") is None else bool(d["engaged"])),
-                   grasp=d.get("grasp"), servo=d.get("servo"))
+                   grasp=d.get("grasp"), servo=d.get("servo"),
+                   hand_grasp=d.get("hand_grasp"))
 
 
 @dataclass
@@ -411,7 +416,8 @@ class JetsonBackend(MotorBackend):
     def write_positions(self, q: np.ndarray, dq: np.ndarray | None = None,
                         grasp: float | None = None,
                         servo: np.ndarray | None = None,
-                        engaged: bool | None = None) -> None:
+                        engaged: bool | None = None,
+                        hand_grasp: float | None = None) -> None:
         """지령 전송. 텔레옵 루프에서 매 프레임 부른다.
 
         Args:
@@ -419,8 +425,9 @@ class JetsonBackend(MotorBackend):
             dq:    Mac 이 **의도한** 관절속도 (rad/s). 안 주면 직전 지령과의
                    차분으로 구한다. ★ 클램프 전 값이므로 v_des 로 쓰면 안 된다.
                      Command.dq 주석 참고.
-            grasp: 손 쥠 정도 0~1. 받는 쪽이 8개로 전개한다.
-            servo: 손 서보각 8개 (rad). ★ 이게 있으면 grasp 보다 우선한다.
+            grasp: 집게(tongs) 엔드이펙터 0~1. 오른손 검지 트리거.
+            servo: AmazingHand 서보각 8개 (rad). 시각 모델.
+            hand_grasp: AmazingHand 0(폄)~1(쥠). 오른손 A/홈 버튼.
 
         ★ 손은 반드시 **서보각**으로 보낸다. 관절각으로 보내면 실물에 없는
           자세가 나온다 (관절 리밋 사각형의 55% 가 도달 불가). 보간도 서보
@@ -453,7 +460,8 @@ class JetsonBackend(MotorBackend):
                       dq=None if dq is None else [float(v) for v in dq],
                       engaged=engaged,
                       grasp=None if grasp is None else float(grasp),
-                      servo=None if servo is None else [float(v) for v in servo])
+                      servo=None if servo is None else [float(v) for v in servo],
+                      hand_grasp=None if hand_grasp is None else float(hand_grasp))
         try:
             self._sock.sendto(cmd.to_bytes(), addr)
         except OSError:
